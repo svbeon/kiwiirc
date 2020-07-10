@@ -7,6 +7,10 @@
     color: #333333;
 }
 
+.kiwi-startup-common-section-info-content img {
+    max-width: 90%;
+}
+
 @media screen and (max-width: 850px) {
     .kiwi-welcome-simple-form {
 	    height: 102%;
