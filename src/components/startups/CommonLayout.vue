@@ -2,9 +2,10 @@
     <div :class="[
         closing ? 'kiwi-startup-common--closing' : '',
         backgroundImage ? '' : 'kiwi-startup-common--no-bg',
-    ]" :style="backgroundStyle" class="kiwi-startup-common">
+    ]" :style="backgroundStyle" class="kiwi-startup-common"
+    >
         <div class="kiwi-startup-common-section kiwi-startup-common-section-connection">
-            <slot name="connection"/>
+            <slot name="connection" />
         </div>
         <div
             :style="backgroundStyle"
@@ -22,8 +23,6 @@
 <script>
 'kiwi public';
 
-import state from '@/libs/state';
-
 export default {
     data() {
         return {
@@ -33,7 +32,7 @@ export default {
     computed: {
         backgroundStyle() {
             let style = {};
-            let options = state.settings.startupOptions;
+            let options = this.$state.settings.startupOptions;
 
             if (options.infoBackground) {
                 style['background-image'] = `url(${options.infoBackground})`;
@@ -41,10 +40,10 @@ export default {
             return style;
         },
         backgroundImage() {
-            return state.settings.startupOptions.infoBackground || '';
+            return this.$state.settings.startupOptions.infoBackground || '';
         },
         infoContent() {
-            return state.settings.startupOptions.infoContent || '';
+            return this.$state.settings.startupOptions.infoContent || '';
         },
     },
     methods: {
@@ -52,7 +51,7 @@ export default {
             this.closing = true;
             let startApp = (event) => {
                 this.$el.removeEventListener('transitionend', startApp);
-                state.persistence.watchStateForChanges();
+                this.$state.persistence.watchStateForChanges();
                 // Hacky to be using $parent but this component should only be used in a sepcific
                 // scope within startup screens
                 this.$parent.$emit('start');
@@ -70,13 +69,14 @@ export default {
     height: 100%;
     text-align: center;
     display: flex;
-    overflow-y: auto;
 }
 
 .kiwi-startup-common-section {
     padding: 1em;
     box-sizing: border-box;
     height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
 
     /* transition the 2 sections out when the page closes. right+left defaults */
     transition: transform 0.4s;
@@ -105,6 +105,7 @@ export default {
     color: #1b1b1b;
     font-size: 1.5em;
     padding: 2em;
+    border-radius: 5px;
     line-height: 1.6em;
 }
 
@@ -123,14 +124,14 @@ export default {
 @media (max-width: 850px) {
     .kiwi-startup-common {
         font-size: 0.9em;
-        flex-direction: column;
-        align-items: center;
-        padding-top: 2em;
+        display: block;
+        overflow-y: auto;
     }
 
     .kiwi-startup-common-section {
         width: 100%;
         min-height: auto;
+        max-width: none;
         height: auto;
         align-items: flex-start;
     }
@@ -139,6 +140,10 @@ export default {
     .kiwi-startup-common--closing {
         transition: transform 0.3s;
         transform: translateY(100%);
+    }
+
+    .kiwi-startup-common-section-connection {
+        padding-top: 2em;
     }
 
     .kiwi-startup-common-section-connection > * {

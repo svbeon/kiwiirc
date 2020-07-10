@@ -1,9 +1,12 @@
+'kiwi public';
+
 import { escape } from 'lodash';
-import state from '@/libs/state';
+import getState from '@/libs/state';
 
 export default render;
 
 function render(blocks, renderEmoticons) {
+    const state = getState();
     const emojiLocation = state.setting('emojiLocation');
     const showEmoticons = typeof renderEmoticons === 'undefined' ?
         state.setting('buffers.show_emoticons') :
@@ -36,8 +39,8 @@ function render(blocks, renderEmoticons) {
         switch (block.type) {
         case 'url':
             content = linkifyUrl(block, {
-                addHandle: true,
-                handleClass: 'fa fa-chevron-right kiwi-messagelist-message-linkhandle',
+                addHandle: state.setting('buffers.show_link_previews'),
+                handleClass: 'fa fa-share-square u-link kiwi-messagelist-message-linkhandle',
             });
             break;
         case 'user':
@@ -113,7 +116,7 @@ function buildSpan(content, classes, style) {
     }
 
     return (
-        `<span` +
+        '<span' +
         (style !== '' ? ` style="${style}"` : '') +
         (classes !== '' ? ` class="${classes}"` : '') +
         `>${content}</span>`

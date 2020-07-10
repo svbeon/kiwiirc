@@ -10,6 +10,7 @@ export default class NetworkState {
         // Enumerable properties that become reactive under Vue
         this.id = id;
         this.name = '';
+        this.editable_name = false;
         // State of the transport
         this.state = 'disconnected';
         this.state_error = '';
@@ -17,6 +18,7 @@ export default class NetworkState {
         this.last_error = '';
         this.auto_commands = '';
         this.is_znc = false;
+        this.is_bnc = false;
         this.hidden = false;
         this.channel_list = [];
         this.channel_list_state = '';
@@ -27,16 +29,20 @@ export default class NetworkState {
             port: 6667,
             tls: false,
             path: '',
+            // Server password
             password: '',
             direct: false,
             encoding: 'utf8',
-            bncname: '',
+            bncnetid: '',
             nick: '',
         };
-        this.settings = {};
+        this.settings = {
+            show_raw_caps: false,
+        };
         this.nick = '';
         this.username = '';
         this.gecos = '';
+        // SASL password
         this.password = '';
         this.away = '';
 

@@ -1,6 +1,6 @@
 <template>
     <div
-        :key="buffer.name"
+        :key="'messagelist-' + buffer.name"
         class="kiwi-messagelist"
         @scroll.self="onThreadScroll"
         @click.self="onListClick"
@@ -9,51 +9,71 @@
             v-if="shouldShowChathistoryTools"
             class="kiwi-messagelist-scrollback"
         >
-            <a class="u-link" @click="buffer.requestScrollback()">
+            <a
+                v-if="!buffer.flag('is_requesting_chathistory')"
+                class="u-link"
+                @click="buffer.requestScrollback()"
+            >
                 {{ $t('messages_load') }}
             </a>
+            <a v-else class="u-link">...</a>
         </div>
 
-        <div
-            v-for="(message, idx) in filteredMessages"
-            :key="message.id"
-            class="kiwi-messagelist-item"
-        >
+        <div v-for="day in filteredMessagesGroupedDay" :key="day.dayNum">
             <div
-                v-if="shouldShowDateChangeMarker(idx)"
+                v-if="filteredMessagesGroupedDay.length > 1 && day.messages.length > 0"
+                :key="'msgdatemarker' + day.dayNum"
                 class="kiwi-messagelist-seperator"
             >
-                <span>{{ (new Date(message.time)).toDateString() }}</span>
-            </div>
-            <div v-if="shouldShowUnreadMarker(idx)" class="kiwi-messagelist-seperator">
-                <span>{{ $t('unread_messages') }}</span>
+                <span>{{ (new Date(day.messages[0].time)).toDateString() }}</span>
             </div>
 
-            <!-- message.template is checked first for a custom component, then each message layout
-                 checks for a message.bodyTemplate custom component to apply only to the body area
-            -->
-            <div
-                v-rawElement="message.template.$el"
-                v-if="message.render() && message.template && message.template.$el"
-            />
-            <message-list-message-modern
-                v-else-if="listType === 'modern'"
-                :message="message"
-                :idx="idx"
-                :ml="thisMl"
-            />
-            <message-list-message-inline
-                v-else-if="listType === 'inline'"
-                :message="message"
-                :idx="idx"
-                :ml="thisMl"
-            />
-            <message-list-message-compact
-                v-else-if="listType === 'compact'"
-                :message="message"
-                :idx="idx"
-                :ml="thisMl"
-            />
+            <template v-for="message in day.messages">
+                <div
+                    v-if="shouldShowUnreadMarker(message)"
+                    :key="'msgunreadmarker' + message.id"
+                    class="kiwi-messagelist-seperator"
+                >
+                    <span>{{ $t('unread_messages') }}</span>
+                </div>
+
+                <div
+                    :key="'msg' + message.id"
+                    :class="[
+                        'kiwi-messagelist-item',
+                        selectedMessages[message.id] ?
+                            'kiwi-messagelist-item--selected' :
+                            ''
+                    ]"
+                >
+                    <!-- message.template is checked first for a custom component, then each message
+                        layout checks for a message.bodyTemplate custom component to apply only to
+                        the body area
+                    -->
+                    <div
+                        v-if="message.render() && message.template && message.template.$el"
+                        v-rawElement="message.template.$el"
+                    />
+                    <message-list-message-modern
+                        v-else-if="listType === 'modern'"
+                        :message="message"
+                        :idx="filteredMessages.indexOf(message)"
+                        :ml="thisMl"
+                    />
+                    <message-list-message-inline
+                        v-else-if="listType === 'inline'"
+                        :message="message"
+                        :idx="filteredMessages.indexOf(message)"
+                        :ml="thisMl"
+                    />
+                    <message-list-message-compact
+                        v-else-if="listType === 'compact'"
+                        :message="message"
+                        :idx="filteredMessages.indexOf(message)"
+                        :ml="thisMl"
+                    />
+                </div>
+            </template>
         </div>
 
         <transition name="kiwi-messagelist-joinloadertrans">
@@ -68,25 +88,30 @@
             :network="buffer.getNetwork()"
         />
 
+        <div ref="ender" />
     </div>
 </template>
 
 <script>
 'kiwi public';
 
+import _ from 'lodash';
 import strftime from 'strftime';
 import Logger from '@/libs/Logger';
+import * as bufferTools from '@/libs/bufferTools';
 import BufferKey from './BufferKey';
 import MessageListMessageCompact from './MessageListMessageCompact';
 import MessageListMessageModern from './MessageListMessageModern';
 import MessageListMessageInline from './MessageListMessageInline';
 import LoadingAnimation from './LoadingAnimation.vue';
 
+require('@/libs/polyfill/Element.closest');
+
 let log = Logger.namespace('MessageList.vue');
 
 // If we're scrolled up more than this many pixels, don't auto scroll down to the bottom
 // of the message list
-const BOTTOM_SCROLL_MARGIN = 30;
+const BOTTOM_SCROLL_MARGIN = 50;
 
 export default {
     components: {
@@ -105,6 +130,7 @@ export default {
             message_info_open: null,
             timeToClose: false,
             startClosing: false,
+            selectedMessages: Object.create(null),
         };
     },
     computed: {
@@ -141,78 +167,24 @@ export default {
                 this.buffer.getNetwork().nick :
                 '';
         },
-        filteredMessages() {
-            let network = this.buffer.getNetwork();
-            let currentNick = network.nick;
-            let bufferMessages = this.buffer.getMessages();
-
-            // Hack; We need to make vue aware that we depend on buffer.message_count in order to
-            // get the messagelist to update its DOM, as the change of message_count alerts
-            // us that the messages have changed. This is done so that vue does not have to make
-            // every emssage reactive which gets very expensive.
-            /* eslint-disable no-unused-vars */
-            let ignoredVar = this.buffer.message_count;
-
-            let messages = bufferMessages.slice(0, bufferMessages.length);
-            messages.sort((a, b) => {
-                if (a.time > b.time) {
-                    return 1;
-                } else if (b.time > a.time) {
-                    return -1;
+        filteredMessagesGroupedDay() {
+            // Group messages by day
+            let days = [];
+            let lastDay = null;
+            this.filteredMessages.forEach((message) => {
+                let day = Math.floor(message.time / 1000 / 86400);
+                if (!lastDay || day !== lastDay) {
+                    days.push({ dayNum: day, messages: [] });
+                    lastDay = day;
                 }
 
-                return 0;
+                days[days.length - 1].messages.push(message);
             });
 
-            let list = [];
-            let maxSize = this.buffer.setting('scrollback_size');
-            let showJoinParts = this.buffer.setting('show_joinparts');
-            let showTopics = this.buffer.setting('show_topics');
-            let showNickChanges = this.buffer.setting('show_nick_changes');
-            let showModeChanges = this.buffer.setting('show_mode_changes');
-            for (let i = messages.length - 1; i >= 0 && list.length < maxSize; i--) {
-                if (!showJoinParts && messages[i].type === 'traffic') {
-                    continue;
-                }
-                if (!showTopics && messages[i].type === 'topic') {
-                    continue;
-                }
-                if (!showNickChanges && messages[i].type === 'nick') {
-                    continue;
-                }
-                if (!showModeChanges && messages[i].type === 'mode') {
-                    continue;
-                }
-                // Ignored users have the ignore flag set
-                if (messages[i].ignore) {
-                    continue;
-                }
-
-                // Don't show the first connection message. Channels are only interested in
-                // the joining message at first. Dis/connection messages are only relevant here
-                // if the dis/connection happens between messages (during a conversation)
-                if (messages[i].type === 'connection' && i === 0) {
-                    continue;
-                }
-
-                // When we join a channel the topic is usually sent next. But this looks
-                // ugly when rendered. So we switch the topic + join messages around so
-                // that the topic is first in the message list.
-                if (
-                    messages[i].type === 'topic' &&
-                    messages[i - 1] &&
-                    messages[i - 1].type === 'traffic' &&
-                    messages[i - 1].nick === currentNick
-                ) {
-                    list.push(messages[i - 1]);
-                    list.push(messages[i]);
-                    i--;
-                } else {
-                    list.push(messages[i]);
-                }
-            }
-
-            return list.reverse();
+            return days;
+        },
+        filteredMessages() {
+            return bufferTools.orderedMessages(this.buffer);
         },
         shouldShowJoiningLoader() {
             return this.buffer.isChannel() &&
@@ -220,9 +192,19 @@ export default {
                 !this.buffer.joined &&
                 this.buffer.getNetwork().state === 'connected';
         },
+        isIos() {
+            return !!navigator.platform && /iPad|iPhone|iPod/.test(navigator.platform);
+        },
+        isIframe() {
+            return window !== window.parent;
+        },
     },
     watch: {
-        buffer(newBuffer) {
+        buffer(newBuffer, oldBuffer) {
+            if (oldBuffer) {
+                oldBuffer.isMessageTrimming = true;
+            }
+
             if (!newBuffer) {
                 return;
             }
@@ -233,7 +215,9 @@ export default {
                 newBuffer.flags.has_opened = true;
             }
 
-            this.scrollToBottom();
+            this.$nextTick(() => {
+                this.scrollToBottom();
+            });
         },
         'buffer.message_count'() {
             this.$nextTick(() => {
@@ -242,6 +226,8 @@ export default {
         },
     },
     mounted() {
+        this.addCopyListeners();
+
         this.$nextTick(() => {
             this.scrollToBottom();
         });
@@ -279,12 +265,17 @@ export default {
                 this.$nextTick(this.maybeScrollToBottom.bind(this));
             }
         },
-        shouldShowUnreadMarker(idx) {
+        shouldShowUnreadMarker(message) {
+            let idx = this.filteredMessages.indexOf(message);
             let previous = this.filteredMessages[idx - 1];
             let current = this.filteredMessages[idx];
             let lastRead = this.buffer.last_read;
 
             if (!lastRead) {
+                return false;
+            }
+
+            if (!current) {
                 return false;
             }
 
@@ -299,7 +290,11 @@ export default {
             let previous = this.filteredMessages[idx - 1];
             let current = this.filteredMessages[idx];
 
-            if (!previous) {
+            if (!previous && (new Date(current.time)).getDay() !== (new Date()).getDay()) {
+                // The first message of the lsit and it's not today
+                return true;
+            } else if (!previous) {
+                // The first message of the lsit but it's today
                 return false;
             }
 
@@ -390,7 +385,12 @@ export default {
 
             let url = event.target.getAttribute('data-url');
             if (url && isLink) {
-                this.$state.$emit('mediaviewer.show', url);
+                if (this.$state.setting('buffers.inline_link_auto_previews')) {
+                    message.embed.type = 'url';
+                    message.embed.payload = url;
+                } else {
+                    this.$state.$emit('mediaviewer.show', url);
+                }
             }
 
             if (this.message_info_open && this.message_info_open !== message) {
@@ -416,17 +416,34 @@ export default {
 
             if (scrolledUpByPx > BOTTOM_SCROLL_MARGIN) {
                 this.auto_scroll = false;
+                this.buffer.isMessageTrimming = false;
             } else {
                 this.auto_scroll = true;
+                this.buffer.isMessageTrimming = true;
             }
         },
         scrollToBottom() {
-            this.$el.scrollTop = this.$el.scrollHeight;
+            if (this.isIos || this.isIframe) {
+                // On iOS using scrollIntoView causes issues with the keyboard pushing
+                // the view upwards resulting in the input box being behind the keyboard
+                //
+                // when inside iframe, scrollIntoView() also scrolls parent window
+
+                this.$el.scrollTop = this.$el.scrollHeight;
+                return;
+            }
+            this.$refs.ender.scrollIntoView(false);
         },
         maybeScrollToBottom() {
-            if (this.auto_scroll) {
-                this.$el.scrollTop = this.$el.scrollHeight;
+            if (!this.maybeScrollToBottom_throttled) {
+                this.maybeScrollToBottom_throttled = _.throttle(() => {
+                    if (this.auto_scroll) {
+                        this.scrollToBottom();
+                    }
+                }, 500, { leading: true });
             }
+
+            this.maybeScrollToBottom_throttled();
         },
         maybeScrollToId(id) {
             let messageElement = this.$el.querySelector('.kiwi-messagelist-message[data-message-id="' + id + '"]');
@@ -435,16 +452,215 @@ export default {
                 this.auto_scroll = false;
             }
         },
+        getSelectedMessages() {
+            let sel = document.getSelection();
+            let r = sel.getRangeAt(0);
+            let messageEls = [...this.$el.querySelectorAll('.kiwi-messagelist-message')];
+            let selectedMessageEls = messageEls.filter((el) => r.intersectsNode(el));
+            return selectedMessageEls;
+        },
+        restrictTextSelection() { // Prevents the selection cursor escaping the message list.
+            document.querySelector('body').classList.add('kiwi-unselectable');
+            this.$el.style.userSelect = 'text';
+        },
+        unrestrictTextSelection() { // Allows all page elements to be selected again.
+            document.querySelector('body').classList.remove('kiwi-unselectable');
+            this.$el.style.userSelect = 'auto';
+        },
+        removeSelections(removeNative = false) {
+            this.selectedMessages = Object.create(null);
+
+            let selection = document.getSelection();
+            if (removeNative && selection) {
+                // stops the native browser selection being left behind after ctrl+c
+                selection.removeAllRanges();
+            }
+        },
+        addCopyListeners() { // Better copy pasting
+            const LogFormatter = (msg) => {
+                let text = '';
+
+                switch (msg.type) {
+                case 'privmsg':
+                    text = `<${msg.nick}> ${msg.message}`;
+                    break;
+                case 'nick':
+                case 'mode':
+                case 'action':
+                case 'traffic':
+                    text = `${msg.message}`;
+                    break;
+                default:
+                    text = msg.message;
+                }
+                if (text.length) {
+                    return `[${(new Date(msg.time)).toLocaleTimeString({ hour: '2-digit', minute: '2-digit', second: '2-digit' })}] ${text}`;
+                }
+                return null;
+            };
+
+            let copyData = '';
+            let selecting = false;
+            let selectionChangeOff = null;
+
+            this.listen(document, 'selectstart', (e) => {
+                if (!this.$el.contains(e.target)) {
+                    // Selected elsewhere on the page
+                    copyData = '';
+                    this.removeSelections();
+                    return;
+                }
+
+                this.removeSelections();
+                selectionChangeOff = this.listen(document, 'selectionchange', onSelectionChange);
+            });
+
+            this.listen(document, 'mouseup', (e) => {
+                selectionChangeOff && selectionChangeOff();
+                this.unrestrictTextSelection();
+                if (selecting) {
+                    e.preventDefault();
+                }
+                selecting = false;
+            });
+
+            let onSelectionChange = (e) => {
+                if (!this.$el) {
+                    return true;
+                }
+
+                copyData = ''; // Store the text data to be copied in this.
+
+                let selection = document.getSelection();
+
+                if (!selection
+                || !selection.anchorNode
+                || !selection.anchorNode.parentNode.closest('.' + this.$el.className)) {
+                    this.unrestrictTextSelection();
+                    this.removeSelections();
+                    return true;
+                }
+
+                this.removeSelections();
+                // Prevent the selection escaping the message list
+                this.restrictTextSelection();
+                if (selection.rangeCount > 0) {
+                    selecting = true;
+
+                    let selectedMesssageEls = this.getSelectedMessages();
+                    let selectedMessages = [];
+                    selectedMesssageEls.forEach((el) => {
+                        let m = this.buffer.messagesObj.messageIds[el.dataset.messageId];
+                        if (m) {
+                            selectedMessages.push(m);
+                        }
+                    });
+
+                    // If only 1 message is selected then treat the selection as native text
+                    // selection. Most likely copying part of a message only.
+                    if (selectedMessages.length === 1) {
+                        selectedMessages = [];
+                    }
+
+                    this.selectedMessages = Object.create(null);
+                    selectedMessages.forEach((m) => {
+                        this.selectedMessages[m.id] = m;
+                    });
+
+                    // Iterate through the selected messages, format and store as a
+                    // string to be used in the copy handler
+                    copyData = selectedMessages
+                        .sort((a, b) => (a.time > b.time ? 1 : -1))
+                        .filter((m) => m.message.trim().length)
+                        .map(LogFormatter)
+                        .join('\r\n');
+                } else {
+                    this.unrestrictTextSelection();
+                }
+                return false;
+            };
+
+            this.listen(document, 'copy', (e) => {
+                if (!copyData || !copyData.length) { // Just do a normal copy if no special data
+                    return true;
+                }
+
+                if (navigator.clipboard) { // Supports Clipboard API
+                    navigator.clipboard.writeText(copyData);
+                } else {
+                    let input = document.createElement('textarea');
+                    document.body.appendChild(input);
+                    input.innerHTML = copyData;
+                    input.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(input);
+                }
+
+                return true;
+            });
+        },
+        // Move a messages embeded content to the main media preview
+        openEmbedInPreview(message) {
+            // First open the embed in the main media preview
+            let embed = message.embed;
+            if (embed.type === 'url') {
+                this.$state.$emit('mediaviewer.show', embed.payload);
+            } else if (embed.type === 'component') {
+                this.$state.$emit('mediaviewer.show', {
+                    component: embed.payload,
+                });
+            }
+
+            // Remove the embed from the message
+            embed.payload = null;
+        },
     },
 };
 </script>
 
 <style lang="less">
+
+.kiwi-unselectable * {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
+div.kiwi-messagelist-item.kiwi-messagelist-item--selected {
+    border-left: 7px solid var(--brand-primary);
+    transform: translateX(20px);
+    transition: transform 0.1s;
+}
+
+div.kiwi-messagelist-item.kiwi-messagelist-item--selected .kiwi-messagelist-message {
+    border-left-width: 0;
+}
+
+.kiwi-messagelist-item.kiwi-messagelist-item--selected .kiwi-messagelist-message *::selection {
+    background-color: unset;
+    color: unset;
+}
+
+.kiwi-unselectable .kiwi-messagelist-scrollback {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
 .kiwi-messagelist {
     overflow-y: auto;
+    overflow-x: hidden;
     box-sizing: border-box;
     margin-bottom: 25px;
     position: relative;
+}
+
+.kiwi-messagelist * {
+    user-select: text;
 }
 
 .kiwi-messagelist::-webkit-scrollbar-track {
@@ -481,46 +697,11 @@ export default {
     font-size: 80%;
 }
 
-.kiwi-messagelist-message-mode,
-.kiwi-messagelist-message-traffic {
-    padding-left: 10px;
-    padding-top: 5px;
-    padding-bottom: 5px;
-}
-
-/* Start of the not connected message styling */
-.kiwi-messagelist-message-connection {
-    padding: 0;
-    text-align: center;
-    font-weight: bold;
-    border: none;
-    margin: 0;
-    background: none;
-}
-
-.kiwi-messagelist-message-connection .kiwi-messagelist-body {
-    font-size: 1.2em;
-    height: auto;
-    line-height: normal;
-    text-align: center;
-    cursor: default;
-    display: inline-block;
-    padding: 0.5em 1em;
-    margin: 1em auto 1em auto;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-}
-
-.kiwi-messagelist-message-connection .kiwi-messagelist-time,
-.kiwi-messagelist-message-connection .kiwi-messagelist-nick {
-    display: none;
-}
-
 /* Remove the styling for none user messages, as they make the page look bloated */
 .kiwi-messagelist-message-mode,
-.kiwi-messagelist-message-traffic,
-.kiwi-messagelist-message-connection {
-    padding: 0.1em 0.5em;
+.kiwi-messagelist-message-traffic {
+    padding-top: 5px;
+    padding-bottom: 5px;
     min-height: 0;
     line-height: normal;
     text-align: left;
@@ -540,7 +721,6 @@ export default {
 .kiwi-messagelist-message-mode,
 .kiwi-messagelist-message-traffic,
 .kiwi-messagelist-message-nick {
-    padding: 5px  0 5px 0;
     margin: 10px 0;
     opacity: 0.85;
     text-align: center;
@@ -601,7 +781,7 @@ export default {
 }
 
 .kiwi-messagelist-message--blur {
-    opacity: 0.5;
+    opacity: 0.3;
 }
 
 .kiwi-messagelist-nick {
@@ -622,7 +802,10 @@ export default {
 .kiwi-messagelist-seperator {
     text-align: center;
     display: block;
-    margin: 1em 0 0.5em 0;
+    margin: 1em auto;
+    position: sticky;
+    top: -1px;
+    z-index: 1;
 }
 
 .kiwi-messagelist-seperator > span {
@@ -630,14 +813,7 @@ export default {
     position: relative;
     z-index: 1;
     padding: 0 1em;
-    top: -0.89em;
-}
-
-.kiwi-messagelist-seperator::after {
-    content: "";
-    display: block;
-    position: relative;
-    top: -0.8em;
+    user-select: none;
 }
 
 /** Displaying an emoji in a message */
@@ -724,15 +900,9 @@ export default {
     font-family: monospace;
 }
 
-/* Ensure unread messages are fully visible, even after themes applied */
-.kiwi-messagelist-message.kiwi-messagelist-message--unread {
-    opacity: 1;
-}
-
 .kiwi-messagelist-message.kiwi-messagelist-message--hover,
 .kiwi-messagelist-message.kiwi-messagelist-message--highlight,
 .kiwi-messagelist-message.kiwi-messagelist-message-traffic--hover {
-    opacity: 1;
     position: relative;
 }
 

@@ -74,6 +74,10 @@ export const configTemplates = {
             share_typing: true,
             // flash_title: message/highlight/off
             flash_title: 'message',
+            nicklist_avatars: false,
+            show_link_previews: true,
+            inline_link_auto_previews: true,
+            inline_link_auto_preview_whitelist: '.*',
         },
         // Startup screen default
         startupOptions: {
@@ -84,11 +88,14 @@ export const configTemplates = {
             nick: 'kiwi_?',
             direct: false,
             state_key: 'kiwi-state',
+            remember_buffers: true,
             nick_format: '',
         },
+        autoReconnect: false,
         disconnectOnSaslFail: true,
         allowRegisterProtocolHandler: false,
         noticeActiveBuffer: true,
+        nicklistGroupAway: false,
         showChanlistModes: false,
         showAutocomplete: true,
         showEmojiPicker: true,
@@ -109,6 +116,7 @@ export const configTemplates = {
 /w /whois $1+
 /raw /quote $1+
 /connect /server $1+
+/disconnect /quit $1+
 /cycle $channel? /lines /part $channel | /join $channel
 /active /back $1+
 /umode /mode $nick $1+
@@ -331,6 +339,7 @@ export const configTemplates = {
             show_emoticons: false,
             show_message_info: false,
             share_typing: false,
+            inline_link_auto_previews: false,
         },
     },
 
