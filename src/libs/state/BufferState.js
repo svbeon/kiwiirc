@@ -24,7 +24,6 @@ export default class BufferState {
         this.modes = Object.create(null);
         this.flags = {
             unread: 0,
-            alert_on: 'default',
             has_opened: false,
             channel_badkey: false,
             chathistory_available: true,
@@ -393,11 +392,7 @@ export default class BufferState {
             let network = this.getNetwork();
             let allowedUpdate = !network ? false : this.isChannel() || this.isQuery();
             if (allowedUpdate && network.connection.bncnetid) {
-                network.ircClient.bnc.bufferSeen(
-                    network.connection.bncnetid,
-                    this.name,
-                    new Date(),
-                );
+                network.ircClient.bnc.bufferSeen(network.connection.bncnetid, this.name);
             }
         }
     }
@@ -416,6 +411,31 @@ export default class BufferState {
             nickLower in this.users ||
             (this.isQuery() && this.name.toLowerCase() === nickLower)
         );
+    }
+
+    hasMode(mode) {
+        return Object.keys(this.modes).indexOf(mode) > -1;
+    }
+
+    shouldShareTyping() {
+        let network = this.getNetwork();
+        if (!this.setting('share_typing')) {
+            // Feature disabled
+            return false;
+        }
+        if (!this.isChannel() && !this.isQuery()) {
+            // Qnly share tying with channels and queries
+            return false;
+        }
+        if (this.isChannel() && !this.joined) {
+            // Channel is in an unjoined state
+            return false;
+        }
+        if (this.hasMode('m') && !this.userMode(network.currentUser())) {
+            // Channel is moderated (+m) and we do not have a user mode +v or above
+            return false;
+        }
+        return true;
     }
 
     removeUser(nick) {
@@ -505,7 +525,6 @@ export default class BufferState {
             return 'connecting';
         } else if (
             networkState === 'connected' &&
-            this.joined &&
             this.enabled &&
             (
                 historySupport &&
