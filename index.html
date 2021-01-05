@@ -5,8 +5,8 @@
     }</style><style class=embedly-css>.card .hdr {
             display:none;
         }</style></head><body><div id=app></div>
-    
-    
+
+
 
 <script>
 console.log('Start');
@@ -38,8 +38,7 @@ window.kiwiConfig = function() {
             "greetingText": "freenode IRC",
             "infoBackground": "static/plugins/freenode/sunny.jpg",
             "infoContent": "<img src=\"static/plugins/freenode/fn-logo.svg\"><p>You have stumbled upon the <a href=\"https://kiwiirc.com\">Kiwi</a> Webchat for the freenode project.<br> To learn more about the freenode IRC network, the freenode #live conference and other freenode projects head over to <a href=\"https://freenode.net\">our website</a>.</p><p></p>",
-            "allowNoChannel": true,
-            "footerText": '<div class="fn-sponsor"><span>Protect your internet with a VPN<br></span>Sponsored by <a href="https://www.privateinternetaccess.com/pages/buy-vpn/freend/">PrivateInternetAccess</a></div>'
+            "allowNoChannel": true
         },
         "embedly": {
             "key": ""
@@ -48,7 +47,7 @@ window.kiwiConfig = function() {
             {"name": "freenode", "url": "static/plugins/freenode/freenode.js"}
         ]
     };
- 
+
     var fragment;
     if (window.location.hash && window.location.hash.indexOf('%') > -1) {
         // Channel has some decoded characters
@@ -68,11 +67,11 @@ window.kiwiConfig = function() {
         conf.startupOptions.channel = fragment;
 	window.location.hash = fragment;
     }
- 
+
     return conf;
 };
 </script>
 
-    
+
 </body>
 </html>
